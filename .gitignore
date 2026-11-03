@@ -3,3 +3,4 @@
 raw_data/
 notebook/
 test.txt
+*.pt

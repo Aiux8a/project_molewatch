@@ -1,1 +1,26 @@
 # this will contain all the python packages needed for the project/app to run properly
+
+# Deep Learning & Computer Vision
+torch==2.2.1 --extra-index-url https://download.pytorch.org/whl/cpu
+torchvision==0.17.1 --extra-index-url https://download.pytorch.org/whl/cpu
+Pillow==10.2.0
+
+# Data Manipulation & Scientific Computing
+numpy==1.26.4
+pandas==2.2.1
+
+# Model Evaluation & Metrics
+scikit-learn==1.4.1.post1
+
+# Data Visualization & Plotting
+matplotlib==3.8.3
+seaborn==0.13.2
+
+# Notebooks & Interactive Environment
+jupyter==1.0.0
+ipykernel==6.29.3
+
+# Web API & Production Deployment
+fastapi==0.110.0
+uvicorn==0.28.0
+python-multipart==0.0.9

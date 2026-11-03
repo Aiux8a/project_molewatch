@@ -1,0 +1,11 @@
+
+.env
+
+__pycache__/
+*.pyc
+.git
+.venv
+processed_data/
+raw_data/
+notebook/
+*.ipynb

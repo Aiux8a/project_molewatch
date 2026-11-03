@@ -1,1 +1,5 @@
+.env
+
 raw_data/
+notebook/
+test.txt

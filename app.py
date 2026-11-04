@@ -1,4 +1,7 @@
 import streamlit as st
+import requests
+
+API_URL = "https://molewatch-app-259840576181.europe-west1.run.app/predict"
 
 st.title("MoleWatch")
 st.caption("Not a diagnosis. Built and tested on dermatoscopic images.")
@@ -8,10 +11,18 @@ uploaded = st.file_uploader("Photo of a mole", type=["jpg", "jpeg", "png"])
 if uploaded:
     st.image(uploaded, width=300)
 
-    # fake until Fareedah's endpoint exists
-    result = {"probability": 0.42, "level": "monitor"}
+    with st.spinner("Checking..."):
+        r = requests.post(
+            API_URL,
+            files={"file": (uploaded.name, uploaded.getvalue(), uploaded.type)},
+        )
 
-    if result["level"] == "refer":
-        st.warning("This doesn't look like an ordinary mole. Worth showing a doctor.")
+    if r.status_code == 200:
+        result = r.json()
+        if result["is_suspicious"]:
+            st.warning("This doesn't look like an ordinary mole. Worth showing a doctor.")
+        else:
+            st.info("This doesn't look like melanoma. Take another photo in a month and "
+                    "compare. See a doctor if it grows, changes colour, bleeds or itches.")
     else:
-        st.info("This doesn't look like melanoma. Keep an eye on it and see a doctor if it changes.")
+            st.error(f"API returned {r.status_code}: {r.text}")

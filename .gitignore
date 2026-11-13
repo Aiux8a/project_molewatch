@@ -1,3 +1,5 @@
 raw_data/
 notebooks/
 .vscode/
+processed_data/
+processed_data.zip

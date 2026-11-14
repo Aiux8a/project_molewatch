@@ -1,9 +1,12 @@
 import base64
+import io
 import math
 from pathlib import Path
 
+import numpy as np
 import requests
 import streamlit as st
+from PIL import Image
 
 API_URL = "https://molewatch-app-259840576181.europe-west1.run.app/predict"
 
@@ -67,14 +70,14 @@ st.markdown("""
 
   /* landing --------------------------------------------------------- */
   .mw-hero { text-align: center; margin-bottom: 1.2rem; }
-  .mw-hero img { width: 110px; height: 110px; object-fit: contain; margin-bottom: .3rem; }
+  .mw-hero img { width: 108px; height: 108px; object-fit: contain; margin-bottom: .3rem; }
   .mw-hero .mw-name { font-size: 2.6rem; display: block; }
   .mw-lede {
     font-family: 'Fraunces', Georgia, serif;
     font-size: 1.35rem;
     line-height: 1.4;
     max-width: 30rem;
-    margin: 1rem auto 0 !important;
+    margin: 1rem auto 2rem !important;
     text-align: center;
   }
 
@@ -92,6 +95,22 @@ st.markdown("""
     color: var(--ink);
     margin: 0 0 .35rem;
   }
+  [data-testid="stExpander"] {
+    max-width: 34rem;
+    margin: 1.5rem auto 0 !important;
+    border: none;
+    border-top: 1px solid var(--rule);
+    background: transparent;
+  }
+  [data-testid="stExpander"] p,
+  [data-testid="stExpander"] li {
+    color: var(--muted);
+    font-size: .88rem;
+    line-height: 1.65;
+  }
+  [data-testid="stExpander"] strong { color: var(--ink); font-weight: 500; }
+  [data-testid="stExpander"] summary { font-size: .9rem; }
+
   .mw-group { margin-top: 1.1rem; }
   .mw-group h4 {
     font-family: 'Work Sans', sans-serif;
@@ -113,6 +132,17 @@ st.markdown("""
   }
   .mw-group ul { margin: 0; padding-left: 1.3rem; }
   .mw-group li { padding: .12rem 0; }
+
+  /* keep the two tabs side by side on a phone — Streamlit wraps them by default */
+  @media (max-width: 640px) {
+    [data-testid="stHorizontalBlock"] {
+      flex-wrap: nowrap !important;
+      gap: .4rem !important;
+    }
+    [data-testid="stColumn"] { min-width: 0 !important; }
+    [data-testid="stButton"] button { font-size: .92rem; padding: .4rem 0; }
+    .block-container { padding-left: 1rem; padding-right: 1rem; }
+  }
 
   /* nav ------------------------------------------------------------- */
   .mw-nav-rule {
@@ -147,6 +177,18 @@ st.markdown("""
     border-bottom: 2px solid var(--notice) !important;
   }
 
+  /* searching ------------------------------------------------------- */
+  .mw-search { text-align: center; margin: 2.5rem 0 1rem; }
+  .mw-search img { width: 76px; height: 76px; object-fit: contain; }
+  .mw-search p {
+    color: var(--muted);
+    font-size: .9rem;
+    margin-top: .4rem !important;
+  }
+
+  .mw-search { text-align: center; margin: 1.5rem 0 1rem; }
+  .mw-search p { color: var(--muted); font-size: .9rem; margin-top: .4rem !important; }
+
   /* aperture -------------------------------------------------------- */
   .mw-scope { display: flex; justify-content: center; margin: .5rem 0 1.75rem; }
 
@@ -155,9 +197,11 @@ st.markdown("""
   .mw-arc .value { fill: none; stroke-width: 6; stroke-linecap: round; }
   .mw-arc .tick  { stroke: var(--ink); stroke-width: 3; stroke-linecap: round; }
 
-  @media (prefers-reduced-motion: no-preference) {
-    .mw-arc .value { animation: mw-draw 900ms cubic-bezier(.25,.9,.3,1) both; }
-    @keyframes mw-draw { from { stroke-dashoffset: var(--circ); } }
+  @keyframes mw-draw { from { stroke-dashoffset: var(--circ); } }
+  .mw-arc .value { animation: mw-draw 900ms cubic-bezier(.25,.9,.3,1) both; }
+
+  @media (prefers-reduced-motion: reduce) {
+    .mw-arc .value { animation: none; }
   }
 
   /* verdict --------------------------------------------------------- */
@@ -191,7 +235,9 @@ st.markdown("""
     max-width: 30rem;
     margin: 0 auto !important;
   }
-  [data-testid="stFileUploader"] label p { text-align: center; }
+  [data-testid="stFileUploader"] label,
+  [data-testid="stFileUploader"] label p,
+  [data-testid="stFileUploader"] label div { text-align: center; width: 100%; }
 
   .mw-foot {
     padding-top: 1.1rem;
@@ -211,6 +257,24 @@ def b64(data: bytes) -> str:
     return base64.b64encode(data).decode()
 
 
+# Minimum share of the frame that must look like skin before we'll send the
+# photo to the model. The model only knows dermatoscopic lesion images, so it
+# returns a confident score for anything at all — a face, a pet, a wall. This
+# catches the obvious cases; it is a crude guard, not a classifier.
+SKIN_FLOOR = 0.40
+
+
+def skin_fraction(data: bytes) -> float:
+    """Roughly what share of the image looks like skin."""
+    img = Image.open(io.BytesIO(data)).convert("RGB").resize((160, 160))
+    a = np.asarray(img).astype(float)
+    r, g, b = a[..., 0], a[..., 1], a[..., 2]
+    spread = a.max(-1) - a.min(-1)
+
+    skin = (r > 40) & (g > 20) & (b > 10) & (r > b) & (r >= g) & (spread > 10)
+    return float(skin.mean())
+
+
 MASCOT_B64 = b64(MASCOT.read_bytes()) if MASCOT.exists() else None
 
 
@@ -227,71 +291,47 @@ def mascot_img(cls: str = "") -> str:
 def landing():
     st.markdown("""
     <p class="mw-lede">
-      Photograph a mole and find out whether it's worth showing to a doctor.
+      Photograph a mole. Find out whether it's worth showing to a doctor.
     </p>
-    """, unsafe_allow_html=True)
 
-    st.markdown("""
     <div class="mw-section">
-      <h3>What it does</h3>
-      MoleWatch looks at a photo of a single mole and gives one of two answers:
-      worth showing to a doctor, or keep an eye on it. It never says what a
-      lesion is, because naming a diagnosis is a doctor's job and usually needs
-      a biopsy.
+      MoleWatch gives one of two answers &mdash; <b>worth showing to a
+      doctor</b>, or <b>keep an eye on it</b>. It won't tell you what something
+      is. Only a doctor can do that, and usually only after a biopsy.
     </div>
 
     <div class="mw-section">
-      <h3>How the two answers are decided</h3>
-      The training data labels seven kinds of lesion. MoleWatch sorts them into
-      two groups, and answers with the group rather than the lesion.
-
-      <div class="mw-group" style="--swatch: var(--notice)">
-        <h4>Worth showing to a doctor</h4>
-        <ul>
-          <li>Melanoma</li>
-          <li>Basal cell carcinoma</li>
-          <li>Actinic keratosis and Bowen's disease</li>
-        </ul>
-      </div>
-
-      <div class="mw-group" style="--swatch: var(--calm)">
-        <h4>Keep an eye on it</h4>
-        <ul>
-          <li>Melanocytic nevus &mdash; an ordinary mole</li>
-          <li>Benign keratosis</li>
-          <li>Dermatofibroma</li>
-          <li>Vascular lesion</li>
-        </ul>
-      </div>
-    </div>
-
-    <div class="mw-section">
-      <h3>What it learned from</h3>
-      10,015 dermatoscopic photographs from the HAM10000 collection, taken in
-      dermatology clinics in Austria and Australia. Each lesion was labelled by
-      a specialist and most labels were confirmed by biopsy. About one mole in
-      five needed a doctor's attention, so the model has seen many more ordinary
-      moles than worrying ones.
-    </div>
-
-    <div class="mw-section">
-      <h3>Why it errs towards sending you to a doctor</h3>
-      A model that says &ldquo;fine&rdquo; too readily misses cancers. Since a
-      missed melanoma costs far more than an unnecessary appointment, the
-      decision point was deliberately set low &mdash; catching more of the
-      lesions that matter, and accepting more false alarms in exchange. Most of
-      those false alarms are benign keratosis, which resembles melanoma closely
-      enough that dermatologists confuse the two.
-    </div>
-
-    <div class="mw-section">
-      <h3>Where it struggles</h3>
-      The training photos were taken through a dermatoscope &mdash; a lit
-      magnifying lens pressed against the skin. An ordinary phone photo looks
-      different enough that MoleWatch is less reliable on one. It has also never
-      seen your skin, your history, or what the mole looked like last month.
+      It was trained on clinical photographs taken through a dermatoscope, so
+      treat anything it says with caution, and take a mole that worries you to a
+      doctor whatever this page tells you.
     </div>
     """, unsafe_allow_html=True)
+
+    with st.expander("What's behind it"):
+        st.markdown("""
+**The data.** 10,015 photographs from the HAM10000 collection, taken in
+dermatology clinics in Austria and Australia. Each lesion was labelled by a
+specialist and most labels were confirmed by biopsy. About one mole in five
+needed a doctor's attention, so the model has seen many more ordinary moles
+than worrying ones.
+
+**The two groups.** The data labels seven kinds of lesion. Melanoma, basal cell
+carcinoma, and actinic keratosis and Bowen's disease are grouped as *worth
+showing to a doctor*. Ordinary moles, benign keratosis, dermatofibroma and
+vascular lesions are grouped as *keep an eye on it*.
+
+**Why it errs towards sending you to a doctor.** A model that says "fine" too
+readily misses cancers, and a missed melanoma costs far more than an
+unnecessary appointment. The decision point was set low on purpose, catching
+more of what matters and accepting more false alarms in exchange. Most of those
+false alarms are benign keratosis, which resembles melanoma closely enough that
+dermatologists confuse the two.
+
+**Where it struggles.** A dermatoscope is a lit magnifying lens pressed against
+the skin, and an ordinary phone photo looks different enough that MoleWatch is
+less reliable on one. It has also never seen your skin, your history, or what
+the mole looked like last month.
+""")
 
 
 # ----------------------------------------------------------------------
@@ -342,16 +382,32 @@ def tool():
     elif EXAMPLE.exists() and st.button("Try an example photo"):
         image_bytes, image_name, image_type = EXAMPLE.read_bytes(), "example.jpg", "image/jpeg"
 
+    if image_bytes and skin_fraction(image_bytes) < SKIN_FLOOR:
+        st.markdown("""
+        <p class="mw-verdict">That doesn't look like skin</p>
+        <p class="mw-body">
+          MoleWatch only reads close-up photos of a single mole, filling most of
+          the frame. Try again with the camera closer in.
+        </p>
+        """, unsafe_allow_html=True)
+        image_bytes = None
+
     if image_bytes:
-        with st.spinner("Looking at it"):
-            try:
-                response = requests.post(
-                    API_URL,
-                    files={"file": (image_name, image_bytes, image_type)},
-                    timeout=30,
-                )
-            except requests.RequestException:
-                response = None
+        searching = st.empty()
+        searching.markdown("""
+        <div class="mw-search"><p>Looking at it</p></div>
+        """, unsafe_allow_html=True)
+
+        try:
+            response = requests.post(
+                API_URL,
+                files={"file": (image_name, image_bytes, image_type)},
+                timeout=30,
+            )
+        except requests.RequestException:
+            response = None
+
+        searching.empty()
 
         if response is None or response.status_code != 200:
             st.markdown("""
@@ -414,7 +470,7 @@ st.markdown(f"""
 
 page = st.session_state.get("page", "intro")
 
-_, nav_a, nav_b, _ = st.columns([1, 1.2, 1.2, 1])
+_, nav_a, nav_b, _ = st.columns([0.3, 1, 1, 0.3])
 
 with nav_a:
     if st.button("Introduction", use_container_width=True,
